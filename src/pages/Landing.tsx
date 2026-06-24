@@ -105,7 +105,7 @@ export function Landing() {
                                     size="lg"
                                     className="w-full transition-all hover:-translate-y-0.5 hover:shadow-lg sm:w-auto"
                                 >
-                                    Take the 3-min survey
+                                    Take the quick survey
                                     <ArrowRight className="h-4 w-4" />
                                 </Button>
                             </Link>
@@ -251,7 +251,7 @@ export function Landing() {
                                 </Button>
                             </Link>
                             <p className="mt-3 text-sm text-neutral-500">
-                                3 minutes · anonymous · 15 quick questions
+                                A few minutes · anonymous · 18 quick questions
                             </p>
                         </div>
                     </div>

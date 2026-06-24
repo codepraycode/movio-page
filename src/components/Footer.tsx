@@ -80,7 +80,7 @@ export function Footer() {
                             className="group bg-brand-500 shadow-brand-900/40 hover:bg-brand-400 inline-flex h-12 items-center justify-center gap-2 rounded-xl px-6 font-semibold text-white shadow-lg transition-all hover:-translate-y-0.5"
                         >
                             <ClipboardList className="h-4.5 w-4.5" />
-                            Take the 3-min survey
+                            Take the quick survey
                             <ArrowUpRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
                         </Link>
                         <button

@@ -1,6 +1,8 @@
 import type { Question, SurveyAnswers } from '@/lib/survey'
+import { LogoMark } from '@/components/Logo'
 import { RadioGroup, CheckboxGroup } from '@/components/ui/OptionGroup'
 import { ScaleSelect } from '@/components/ui/ScaleSelect'
+import { ModeRatingGrid } from '@/components/ui/ModeRatingGrid'
 import { Textarea } from '@/components/ui/Textarea'
 
 interface SurveyQuestionProps {
@@ -12,6 +14,8 @@ interface SurveyQuestionProps {
 
 export function SurveyQuestion({ question, answers, onChange, error }: SurveyQuestionProps) {
     const value = answers[question.key]
+    const reaction =
+        question.reactions && value !== null ? question.reactions[String(value)] : undefined
 
     return (
         <div className="space-y-2.5">
@@ -66,6 +70,10 @@ export function SurveyQuestion({ question, answers, onChange, error }: SurveyQue
                 />
             )}
 
+            {question.type === 'mode_matrix' && question.rows && (
+                <ModeRatingGrid rows={question.rows} answers={answers} onChange={onChange} />
+            )}
+
             {question.type === 'textarea' && (
                 <Textarea
                     value={value as string}
@@ -78,6 +86,17 @@ export function SurveyQuestion({ question, answers, onChange, error }: SurveyQue
                 <p className="text-xs text-neutral-400">
                     {(value as string[]).length}/{question.maxSelections} selected
                 </p>
+            )}
+
+            {/* The founder "whispers back" the moment a telling answer lands. */}
+            {reaction && (
+                <div
+                    key={reaction}
+                    className="animate-fade-up text-brand-800 flex items-start gap-2 rounded-xl bg-brand-50/80 px-3 py-2 text-[13px] font-medium"
+                >
+                    <LogoMark className="mt-0.5 h-4 w-4 shrink-0 rounded-md" />
+                    <span className="leading-snug">{reaction}</span>
+                </div>
             )}
 
             {error && <p className="text-sm font-medium text-red-600">{error}</p>}

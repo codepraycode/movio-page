@@ -19,7 +19,9 @@ create table if not exists survey_responses (
 
     -- Section A: About you
     study_level text,
-    shuttle_frequency text,
+    transport_frequency text,        -- gate: "Never" ends the survey early
+    transport_modes text[],          -- modes used (shuttle / Keke / cab)
+    primary_mode text,               -- mode relied on most
 
     -- Section B: Current experience
     wait_time text,
@@ -27,7 +29,10 @@ create table if not exists survey_responses (
     late_for_lecture text,
     full_bus_experience text,
     change_problem text,
-    satisfaction_score integer,
+    shuttle_rating integer,          -- per-mode 1–5 satisfaction
+    keke_rating integer,
+    cab_rating integer,
+    satisfaction_score integer,      -- overall campus transport satisfaction
     biggest_problem text,
 
     -- Section C: Technology
@@ -38,6 +43,33 @@ create table if not exists survey_responses (
     app_comfort text,
     additional_comments text
 );
+
+-- ---------------------------------------------------------------------------
+-- Migration — bring an EXISTING survey_responses table up to the 3-mode shape.
+-- Safe to re-run; no-ops once applied. (New databases get everything from the
+-- CREATE above and can skip this block.)
+-- ---------------------------------------------------------------------------
+
+-- Rename shuttle_frequency → transport_frequency, only if not already done.
+do $$
+begin
+    if exists (
+        select 1 from information_schema.columns
+        where table_name = 'survey_responses' and column_name = 'shuttle_frequency'
+    ) and not exists (
+        select 1 from information_schema.columns
+        where table_name = 'survey_responses' and column_name = 'transport_frequency'
+    ) then
+        alter table survey_responses rename column shuttle_frequency to transport_frequency;
+    end if;
+end $$;
+
+alter table survey_responses add column if not exists transport_frequency text;
+alter table survey_responses add column if not exists transport_modes text[];
+alter table survey_responses add column if not exists primary_mode text;
+alter table survey_responses add column if not exists shuttle_rating integer;
+alter table survey_responses add column if not exists keke_rating integer;
+alter table survey_responses add column if not exists cab_rating integer;
 
 -- ---------------------------------------------------------------------------
 -- Row Level Security — anonymous inserts only, no client-side reads.

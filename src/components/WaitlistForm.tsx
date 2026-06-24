@@ -81,7 +81,7 @@ export function WaitlistForm() {
                     type="email"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    placeholder="you@futa.edu.ng"
+                    placeholder="you@whatever.com"
                     required
                     autoComplete="email"
                 />

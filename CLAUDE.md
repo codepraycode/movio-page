@@ -60,13 +60,18 @@ movio-survey/
 ```typescript
   export interface SurveyResponsePayload {
     study_level: string;
-    shuttle_frequency: string;
+    transport_frequency: string;        // gate: "Never" ends the survey early
+    transport_modes: string[];          // shuttle / Keke / cab
+    primary_mode: string;
     wait_time: string;
     arrival_awareness: string;
     late_for_lecture: string;
     full_bus_experience: string;
     change_problem: string;
-    satisfaction_score: number | null;
+    shuttle_rating: number | null;      // per-mode 1–5 satisfaction
+    keke_rating: number | null;
+    cab_rating: number | null;
+    satisfaction_score: number | null;  // overall
     biggest_problem?: string;
     has_nfc: string;
     live_tracking_usefulness: string;
@@ -87,5 +92,5 @@ movio-survey/
 ### UX & Form Submission Rules
 
 * **Optimistic State Execution:** Show loading states immediately (`isSubmitting`) to prevent multiple clicks and redundant data ingestion.
-* **Conditional Handling:** Ensure the step sequence cuts off gracefully right after Step 1 if the user provides a negative use case choice on `shuttle_frequency` ("Never").
+* **Conditional Handling:** Ensure the step sequence cuts off gracefully right after the gate question if the user provides a negative use case choice on `transport_frequency` ("Never — I walk or use my own vehicle").
 * **Error Interception:** Parse raw PostgreSQL unique-constraint or validation objects safely before flashing Toast notifications to users.

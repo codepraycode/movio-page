@@ -1,42 +1,68 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ArrowLeft, ArrowRight, CheckCircle2, PartyPopper, Send, ShieldCheck } from 'lucide-react'
+import {
+    ArrowLeft,
+    ArrowRight,
+    CheckCircle2,
+    CornerDownLeft,
+    PartyPopper,
+    Send,
+    ShieldCheck,
+} from 'lucide-react'
 import { Navbar } from '@/components/Navbar'
 import { Footer } from '@/components/Footer'
 import { ProgressBar } from '@/components/ProgressBar'
 import { SurveyQuestion } from '@/components/SurveyQuestion'
+import { SurveyHost } from '@/components/SurveyHost'
 import { WaitlistForm } from '@/components/WaitlistForm'
 import { ShareButtons } from '@/components/ShareButtons'
+import { Confetti } from '@/components/Confetti'
 import { Button } from '@/components/ui/Button'
+import { Input } from '@/components/ui/Input'
+import { Label } from '@/components/ui/Label'
 import { useToast } from '@/components/ui/toast'
-import { supabase } from '@/lib/supabase'
+import { supabase, PG_UNIQUE_VIOLATION } from '@/lib/supabase'
 import {
     surveySteps,
     initialAnswers,
-    NEVER_USES_SHUTTLE,
+    CONTACT_HOST,
+    NEVER_USES_TRANSPORT,
     type SurveyAnswers,
     type Question,
 } from '@/lib/survey'
 
-type View = 'form' | 'exit' | 'done'
+type View = 'form' | 'exit' | 'contact' | 'done'
+type Direction = 'forward' | 'back'
 
-/** A little momentum nudge under the progress bar per step. */
-const stepEncouragement = [
-    'Just two quick ones to start 👇',
-    'Nice — now the real stuff. You’re flying through this.',
-    'Last step! You’re basically done 🎉',
-]
+/** Question sections + the final contact step, for the overall total. */
+const TOTAL_STEPS = surveySteps.length + 1
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 export function Survey() {
     const { toast } = useToast()
     const [view, setView] = useState<View>('form')
-    const [stepIndex, setStepIndex] = useState(0)
+    // The flow advances one question at a time, framed inside its section.
+    const [sectionIndex, setSectionIndex] = useState(0)
+    const [questionIndex, setQuestionIndex] = useState(0)
+    const [direction, setDirection] = useState<Direction>('forward')
     const [answers, setAnswers] = useState<SurveyAnswers>(initialAnswers)
     const [errors, setErrors] = useState<Record<string, string>>({})
     const [submitting, setSubmitting] = useState(false)
 
-    const step = surveySteps[stepIndex]
-    const isLastStep = stepIndex === surveySteps.length - 1
+    // Final contact step — kept separate from `answers` so the survey row itself
+    // stays anonymous; these only feed the optional waitlist opt-in.
+    const [contactName, setContactName] = useState('')
+    const [contactEmail, setContactEmail] = useState('')
+    const [joinWaitlist, setJoinWaitlist] = useState(true)
+    const [joinedWaitlist, setJoinedWaitlist] = useState(false)
+
+    const section = surveySteps[sectionIndex]
+    const question = section.questions[questionIndex]
+    const isLastSection = sectionIndex === surveySteps.length - 1
+    const isLastInSection = questionIndex === section.questions.length - 1
+    const isFinalQuestion = isLastSection && isLastInSection
+    const isFirstQuestion = sectionIndex === 0 && questionIndex === 0
 
     function update(key: keyof SurveyAnswers, value: string | number | string[] | null) {
         setAnswers((prev) => ({ ...prev, [key]: value }))
@@ -48,54 +74,96 @@ export function Survey() {
         })
     }
 
-    /** Validate the current step; returns true if it passes. */
-    function validateStep(): boolean {
-        const next: Record<string, string> = {}
-        for (const q of step.questions) {
-            const err = validateQuestion(q, answers)
-            if (err) next[q.key] = err
+    /** Validate just the question on screen; returns true if it passes. */
+    function validateCurrentQuestion(): boolean {
+        const err = validateQuestion(question, answers)
+        setErrors(err ? { [question.key]: err } : {})
+        if (err) {
+            toast({ variant: 'info', title: 'One quick thing', description: err })
         }
-        setErrors(next)
-        if (Object.keys(next).length > 0) {
-            toast({
-                variant: 'info',
-                title: 'Just a couple left on this step',
-                description: 'Mind answering the highlighted questions before we continue?',
-            })
-        }
-        return Object.keys(next).length === 0
+        return !err
     }
 
     function handleNext() {
-        if (!validateStep()) return
+        if (!validateCurrentQuestion()) return
 
-        // Conditional exit: a student who never uses the shuttle stops here.
-        if (stepIndex === 0 && answers.shuttle_frequency === NEVER_USES_SHUTTLE) {
+        // Conditional exit: a student who uses no campus transport stops here.
+        if (
+            question.key === 'transport_frequency' &&
+            answers.transport_frequency === NEVER_USES_TRANSPORT
+        ) {
             setView('exit')
             window.scrollTo({ top: 0, behavior: 'smooth' })
             return
         }
 
-        if (isLastStep) {
-            void handleSubmit()
+        setDirection('forward')
+
+        if (isFinalQuestion) {
+            // Hand off to the contact step rather than submitting straight away.
+            setView('contact')
+        } else if (isLastInSection) {
+            setSectionIndex((i) => i + 1)
+            setQuestionIndex(0)
         } else {
-            setStepIndex((i) => i + 1)
-            window.scrollTo({ top: 0, behavior: 'smooth' })
+            setQuestionIndex((i) => i + 1)
         }
+        window.scrollTo({ top: 0, behavior: 'smooth' })
     }
 
     function handleBack() {
         setErrors({})
-        setStepIndex((i) => Math.max(0, i - 1))
+        setDirection('back')
+        if (questionIndex > 0) {
+            setQuestionIndex((i) => i - 1)
+        } else if (sectionIndex > 0) {
+            const prev = sectionIndex - 1
+            setSectionIndex(prev)
+            setQuestionIndex(surveySteps[prev].questions.length - 1)
+        }
+        window.scrollTo({ top: 0, behavior: 'smooth' })
+    }
+
+    // Press Enter to advance — except inside the textarea, where it adds a line.
+    useEffect(() => {
+        if (view !== 'form') return
+        function onKey(e: KeyboardEvent) {
+            if (e.key !== 'Enter' || e.shiftKey) return
+            if (e.target instanceof HTMLTextAreaElement) return
+            e.preventDefault()
+            handleNext()
+        }
+        window.addEventListener('keydown', onKey)
+        return () => window.removeEventListener('keydown', onKey)
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [view, sectionIndex, questionIndex, answers])
+
+    function backToForm() {
+        setDirection('back')
+        setView('form')
         window.scrollTo({ top: 0, behavior: 'smooth' })
     }
 
     async function handleSubmit() {
-        setSubmitting(true)
-        const { error } = await supabase.from('survey_responses').insert(answers)
-        setSubmitting(false)
+        // If they want in on the waitlist, we need real contact details first.
+        const name = contactName.trim()
+        const email = contactEmail.trim().toLowerCase()
+        if (joinWaitlist && (!name || !EMAIL_RE.test(email))) {
+            toast({
+                variant: 'info',
+                title: 'Almost there',
+                description:
+                    'Add your name and a valid email to join the waitlist — or untick it to finish anonymously.',
+            })
+            return
+        }
 
-        if (error) {
+        setSubmitting(true)
+
+        // 1. The survey response — always anonymous, no name/email attached.
+        const { error: surveyError } = await supabase.from('survey_responses').insert(answers)
+        if (surveyError) {
+            setSubmitting(false)
             toast({
                 variant: 'error',
                 title: 'Could not submit',
@@ -104,6 +172,23 @@ export function Survey() {
             return
         }
 
+        // 2. Optional waitlist opt-in — a failure here must not lose the survey.
+        if (joinWaitlist) {
+            const { error: waitlistError } = await supabase.from('waitlist').insert({ name, email })
+            if (waitlistError && waitlistError.code === PG_UNIQUE_VIOLATION) {
+                setJoinedWaitlist(true)
+            } else if (waitlistError) {
+                toast({
+                    variant: 'info',
+                    title: 'Response saved',
+                    description: 'We saved your answers, but couldn’t add you to the waitlist.',
+                })
+            } else {
+                setJoinedWaitlist(true)
+            }
+        }
+
+        setSubmitting(false)
         setView('done')
         window.scrollTo({ top: 0, behavior: 'smooth' })
     }
@@ -119,47 +204,50 @@ export function Survey() {
                 <main className="relative mx-auto max-w-2xl px-4 py-10">
                     {view === 'form' && (
                         <div className="space-y-6">
-                            <div className="space-y-2">
-                                <ProgressBar current={stepIndex + 1} total={surveySteps.length} />
-                                <p className="text-brand-700 text-sm font-medium">
-                                    {stepEncouragement[stepIndex]}
-                                </p>
-                            </div>
+                            <ProgressBar
+                                current={questionIndex + 1}
+                                total={section.questions.length}
+                                label="Question"
+                                context={`${section.section} of ${TOTAL_STEPS}`}
+                            />
 
-                            {/* key forces a replayed entrance animation on each step change */}
-                            <div key={stepIndex} className="animate-fade-up space-y-6">
+                            {/* Section header + host stay put; only the question frame flips.
+                                key on sectionIndex replays their entrance per section. */}
+                            <div key={`sec-${sectionIndex}`} className="animate-fade-up space-y-4">
                                 <div>
                                     <span className="border-brand-200 bg-brand-50 text-brand-700 inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold">
                                         <span className="bg-brand-500 h-1.5 w-1.5 rounded-full" />
-                                        {step.section}
+                                        {section.title}
                                     </span>
-                                    <h1 className="mt-2.5 text-2xl font-bold tracking-tight text-neutral-900">
-                                        {step.title}
-                                    </h1>
-                                    <p className="mt-1 text-sm text-neutral-600">
-                                        {step.description}
-                                    </p>
                                 </div>
+                                <SurveyHost message={section.host} />
+                            </div>
 
-                                <div className="shadow-card relative space-y-8 overflow-hidden rounded-2xl border border-neutral-200 bg-white p-5 sm:p-7">
+                            {/* The live frame: one question, sliding in per step. */}
+                            <div
+                                key={`q-${sectionIndex}-${questionIndex}`}
+                                className={
+                                    direction === 'back'
+                                        ? 'animate-frame-in-left'
+                                        : 'animate-frame-in-right'
+                                }
+                            >
+                                <div className="shadow-card relative overflow-hidden rounded-2xl border border-neutral-200 bg-white p-5 sm:p-7">
                                     <span
                                         className="from-brand-400 via-brand-500 to-brand-600 absolute inset-x-0 top-0 h-1 bg-gradient-to-r"
                                         aria-hidden
                                     />
-                                    {step.questions.map((q) => (
-                                        <SurveyQuestion
-                                            key={q.key}
-                                            question={q}
-                                            answers={answers}
-                                            onChange={update}
-                                            error={errors[q.key]}
-                                        />
-                                    ))}
+                                    <SurveyQuestion
+                                        question={question}
+                                        answers={answers}
+                                        onChange={update}
+                                        error={errors[question.key]}
+                                    />
                                 </div>
                             </div>
 
                             <div className="flex items-center justify-between gap-3">
-                                {stepIndex > 0 ? (
+                                {!isFirstQuestion ? (
                                     <Button variant="outline" onClick={handleBack}>
                                         <ArrowLeft className="h-4 w-4" /> Back
                                     </Button>
@@ -168,34 +256,51 @@ export function Survey() {
                                 )}
                                 <Button
                                     onClick={handleNext}
-                                    loading={submitting}
                                     className="transition-all hover:-translate-y-0.5 hover:shadow-md"
                                 >
-                                    {isLastStep ? (
-                                        submitting ? (
-                                            'Submitting...'
-                                        ) : (
-                                            <>
-                                                Submit survey <Send className="h-4 w-4" />
-                                            </>
-                                        )
+                                    {isFinalQuestion ? (
+                                        <>
+                                            Almost done <ArrowRight className="h-4 w-4" />
+                                        </>
                                     ) : (
                                         <>
-                                            Next <ArrowRight className="h-4 w-4" />
+                                            Continue <ArrowRight className="h-4 w-4" />
                                         </>
                                     )}
                                 </Button>
                             </div>
 
-                            <p className="flex items-center justify-center gap-1.5 text-center text-xs text-neutral-400">
-                                <ShieldCheck className="h-3.5 w-3.5" />
-                                Anonymous · your answers shape a real FUTA project
+                            <p className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-center text-xs text-neutral-400">
+                                <span className="inline-flex items-center gap-1.5">
+                                    <ShieldCheck className="h-3.5 w-3.5" />
+                                    Anonymous · shapes a real FUTA project
+                                </span>
+                                <span className="hidden items-center gap-1.5 sm:inline-flex">
+                                    <kbd className="rounded border border-neutral-300 bg-white px-1.5 py-0.5 font-sans text-[10px] text-neutral-500">
+                                        Enter
+                                    </kbd>
+                                    <CornerDownLeft className="h-3 w-3" /> to continue
+                                </span>
                             </p>
                         </div>
                     )}
 
+                    {view === 'contact' && (
+                        <ContactStep
+                            name={contactName}
+                            email={contactEmail}
+                            joinWaitlist={joinWaitlist}
+                            submitting={submitting}
+                            onName={setContactName}
+                            onEmail={setContactEmail}
+                            onToggleWaitlist={setJoinWaitlist}
+                            onBack={backToForm}
+                            onSubmit={() => void handleSubmit()}
+                        />
+                    )}
+
                     {view === 'exit' && <ExitScreen />}
-                    {view === 'done' && <ThankYouScreen />}
+                    {view === 'done' && <ThankYouScreen joinedWaitlist={joinedWaitlist} />}
                 </main>
             </div>
             <Footer />
@@ -225,6 +330,126 @@ function validateQuestion(q: Question, answers: SurveyAnswers): string | null {
     return value === '' || value === null ? 'This question is required.' : null
 }
 
+interface ContactStepProps {
+    name: string
+    email: string
+    joinWaitlist: boolean
+    submitting: boolean
+    onName: (v: string) => void
+    onEmail: (v: string) => void
+    onToggleWaitlist: (v: boolean) => void
+    onBack: () => void
+    onSubmit: () => void
+}
+
+/**
+ * The final, conversational step: collect name + email purely to power the
+ * optional waitlist opt-in. The survey response itself stays anonymous.
+ */
+function ContactStep({
+    name,
+    email,
+    joinWaitlist,
+    submitting,
+    onName,
+    onEmail,
+    onToggleWaitlist,
+    onBack,
+    onSubmit,
+}: ContactStepProps) {
+    return (
+        <div className="space-y-6">
+            <ProgressBar current={TOTAL_STEPS} total={TOTAL_STEPS} />
+
+            <div className="space-y-6">
+                <SurveyHost message={CONTACT_HOST} />
+
+                <form
+                    className="animate-fade-up space-y-6"
+                    onSubmit={(e) => {
+                        e.preventDefault()
+                        if (!submitting) onSubmit()
+                    }}
+                >
+                    <div className="shadow-card relative space-y-5 overflow-hidden rounded-2xl border border-neutral-200 bg-white p-5 sm:p-7">
+                        <span
+                            className="from-brand-400 via-brand-500 to-brand-600 absolute inset-x-0 top-0 h-1 bg-gradient-to-r"
+                            aria-hidden
+                        />
+                        <div>
+                            <Label htmlFor="contact-name">
+                                Your name{' '}
+                                <span className="font-normal text-neutral-400">(optional)</span>
+                            </Label>
+                            <Input
+                                id="contact-name"
+                                value={name}
+                                onChange={(e) => onName(e.target.value)}
+                                placeholder="What should I call you?"
+                                autoComplete="name"
+                            />
+                        </div>
+                        <div>
+                            <Label htmlFor="contact-email">
+                                Email{' '}
+                                <span className="font-normal text-neutral-400">(optional)</span>
+                            </Label>
+                            <Input
+                                id="contact-email"
+                                type="email"
+                                value={email}
+                                onChange={(e) => onEmail(e.target.value)}
+                                placeholder="you@whatever.com"
+                                autoComplete="email"
+                            />
+                        </div>
+
+                        <label className="hover:border-brand-300 flex cursor-pointer items-start gap-3 rounded-xl border border-neutral-200 bg-neutral-50/60 p-3.5 transition-colors">
+                            <input
+                                type="checkbox"
+                                checked={joinWaitlist}
+                                onChange={(e) => onToggleWaitlist(e.target.checked)}
+                                className="text-brand-600 focus:ring-brand-500/40 mt-0.5 h-5 w-5 shrink-0 rounded border-neutral-300"
+                            />
+                            <span className="text-sm leading-snug text-neutral-700">
+                                <span className="font-semibold text-neutral-900">
+                                    Yes, add me to the Movio waitlist.
+                                </span>{' '}
+                                I’d like a heads-up on how it goes.
+                            </span>
+                        </label>
+
+                        <p className="flex items-start gap-1.5 text-xs text-neutral-400">
+                            <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                            Your survey answers stay anonymous. Your email is only used for the
+                            waitlist — nothing else, no spam.
+                        </p>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-3">
+                        <Button type="button" variant="outline" onClick={onBack}>
+                            <ArrowLeft className="h-4 w-4" /> Back
+                        </Button>
+                        <Button
+                            type="submit"
+                            loading={submitting}
+                            className="transition-all hover:-translate-y-0.5 hover:shadow-md"
+                        >
+                            {submitting ? (
+                                'Submitting...'
+                            ) : (
+                                <>
+                                    Submit survey <Send className="h-4 w-4" />
+                                </>
+                            )}
+                        </Button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    )
+}
+
 function ExitScreen() {
     return (
         <div className="animate-fade-up space-y-6">
@@ -234,9 +459,9 @@ function ExitScreen() {
                     Thanks for your honesty 🙏🏽
                 </h1>
                 <p className="mx-auto mt-3 max-w-md text-neutral-600">
-                    Since you don’t use the shuttle, the rest won’t really apply to you — no
+                    Since you don’t really use campus transport, the rest won’t apply to you — no
                     worries. You can still join the Movio waitlist below, or pass this on to a
-                    friend who does ride the shuttle.
+                    friend who rides the shuttle, Keke or cab.
                 </p>
             </div>
             <div className="rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm">
@@ -254,11 +479,12 @@ function ExitScreen() {
     )
 }
 
-function ThankYouScreen() {
+function ThankYouScreen({ joinedWaitlist }: { joinedWaitlist: boolean }) {
     const shareUrl = typeof window !== 'undefined' ? window.location.origin : ''
 
     return (
         <div className="animate-fade-up space-y-6">
+            <Confetti />
             <div className="border-brand-100 from-brand-50 relative overflow-hidden rounded-2xl border bg-gradient-to-br to-white p-8 text-center shadow-sm">
                 <PartyPopper className="text-brand-600 mx-auto h-12 w-12" />
                 <h1 className="mt-4 text-2xl font-bold text-neutral-900">
@@ -275,23 +501,35 @@ function ThankYouScreen() {
                 <h2 className="text-lg font-bold text-neutral-900">One tiny favour? 🙏🏽</h2>
                 <p className="mt-1.5 text-sm text-neutral-600">
                     The research only holds up if enough <strong>real FUTA students</strong>{' '}
-                    respond. If you know even one or two course mates, please forward this — it
-                    takes them 3 minutes and it pushes Movio forward more than you’d think.
+                    respond. If you know even one or two course mates, please forward this — it only
+                    takes a few minutes and it pushes Movio forward more than you’d think.
                 </p>
                 <div className="mt-4">
                     <ShareButtons url={shareUrl} />
                 </div>
             </div>
 
-            <div className="rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm">
-                <h2 className="mb-1 text-center text-lg font-semibold text-neutral-900">
-                    Haven’t joined the waitlist yet?
-                </h2>
-                <p className="mb-4 text-center text-sm text-neutral-600">
-                    Get notified the moment Movio launches.
-                </p>
-                <WaitlistForm />
-            </div>
+            {joinedWaitlist ? (
+                <div className="border-brand-200 bg-brand-50 flex items-center gap-3 rounded-2xl border p-6">
+                    <CheckCircle2 className="text-brand-600 h-8 w-8 shrink-0" />
+                    <div>
+                        <p className="text-brand-900 font-semibold">You’re on the waitlist 🎉</p>
+                        <p className="text-brand-800 text-sm">
+                            I’ll reach out the moment Movio is ready to launch.
+                        </p>
+                    </div>
+                </div>
+            ) : (
+                <div className="rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm">
+                    <h2 className="mb-1 text-center text-lg font-semibold text-neutral-900">
+                        Haven’t joined the waitlist yet?
+                    </h2>
+                    <p className="mb-4 text-center text-sm text-neutral-600">
+                        Get notified the moment Movio launches.
+                    </p>
+                    <WaitlistForm />
+                </div>
+            )}
 
             <p className="text-center">
                 <Link to="/" className="text-brand-700 hover:text-brand-800 text-sm font-medium">

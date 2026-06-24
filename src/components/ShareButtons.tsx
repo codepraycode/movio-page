@@ -5,9 +5,9 @@ import { useToast } from '@/components/ui/toast'
 
 /** The plea we send out — warm, specific, and easy to forward. */
 export const SHARE_MESSAGE =
-    'I just filled out this 3-minute survey for Movio — a smart FUTA campus shuttle app ' +
-    '(live tracking + tap-to-board) being built as a final year project. It only counts if real ' +
-    'FUTA students respond 🙏🏽 Please help a fellow student out:'
+    'I just filled out this quick survey for Movio — a smart FUTA campus transport app for the ' +
+    'shuttle, Keke and cabs (live tracking + tap-to-pay) being built as a final year project. ' +
+    'It only counts if real FUTA students respond 🙏🏽 Please help a fellow student out:'
 
 interface ShareButtonsProps {
     url: string
