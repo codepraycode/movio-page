@@ -86,3 +86,23 @@ create policy "Allow anonymous inserts" on waitlist
 drop policy if exists "Allow anonymous inserts" on survey_responses;
 create policy "Allow anonymous inserts" on survey_responses
     for insert with check (true);
+
+-- ---------------------------------------------------------------------------
+-- Admin dashboard reads (/admin page).
+--
+-- The dashboard runs entirely in the browser with the public publishable key,
+-- so enabling SELECT here makes the collected data readable by anyone holding
+-- that key — the 6-character access code on /admin is a convenience lock, NOT
+-- real security. That is acceptable for an anonymous transport survey.
+--
+-- To fully lock reads down again, DROP both policies below; the dashboard will
+-- then surface a clear "reads are blocked" message instead of data.
+-- ---------------------------------------------------------------------------
+
+drop policy if exists "Allow anonymous reads" on survey_responses;
+create policy "Allow anonymous reads" on survey_responses
+    for select using (true);
+
+drop policy if exists "Allow anonymous reads" on waitlist;
+create policy "Allow anonymous reads" on waitlist
+    for select using (true);
