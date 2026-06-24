@@ -50,7 +50,7 @@ reserved for a headline.` Then still add the real text/logo yourself for sharpne
 ## After exporting
 
 - Save to `public/og.jpg` (exactly that path/name).
-- The absolute URLs in `index.html` already point at `https://movio.vercel.app`.
+- The absolute URLs in `index.html` already point at `https://movioapp.vercel.app`.
   Update them only if the deployed domain changes.
 - Validate with Facebook Sharing Debugger, X Card Validator, or
   https://www.opengraph.xyz — they also force a re-scrape of the cache.
