@@ -1,8 +1,10 @@
 # Movio Page
 
 The landing page + research survey for **Movio** — a smart campus transportation
-management system for the Federal University of Technology, Akure (FUTA) that
-combines NFC-based student authentication with real-time GPS shuttle tracking.
+management system for the Federal University of Technology, Akure (FUTA). Movio
+brings real-time GPS tracking and NFC tap-to-pay to all three campus transport
+modes — the **shuttle (campus bus)**, **Keke (tricycle)** and **cab** — so
+students stop guessing when their next ride is coming.
 
 This site does two jobs:
 
@@ -41,9 +43,11 @@ Router v6. The actual implementation differs slightly, on purpose:
 - **React Router 7** — current major; the two-route API used here is identical
   to v6.
 
-Everything the spec asked for — the 15-question multi-step survey, the "Never"
-conditional exit, the Q13 max-3 validation, the waitlist with duplicate-email
-handling, loading/success/error states — is implemented.
+Everything the spec asked for — the multi-step survey, the "Never" conditional
+exit, the max-3 feature-select validation, the waitlist with duplicate-email
+handling, loading/success/error states — is implemented, and the survey has since
+grown into an 18-question, one-question-at-a-time conversational flow covering all
+three transport modes (see [The survey](#the-survey)).
 
 ---
 
@@ -56,15 +60,18 @@ movio-survey/
 ├── src/
 │   ├── lib/
 │   │   ├── supabase.ts        # Supabase client + helpers
-│   │   ├── survey.ts          # Declarative 15-question survey definition + types
+│   │   ├── survey.ts          # Declarative 18-question survey definition + types
 │   │   └── utils.ts           # cn() class-name helper
 │   ├── components/
-│   │   ├── ui/                # Button, Card, Input, Label, Textarea,
-│   │   │                      #   OptionGroup (radio/checkbox), Progress, toast
+│   │   ├── ui/                # Button, Card, Input, Label, Textarea, OptionGroup
+│   │   │                      #   (radio/checkbox), ScaleSelect, ModeRatingGrid,
+│   │   │                      #   Progress, toast
 │   │   ├── Navbar.tsx
 │   │   ├── Footer.tsx
-│   │   ├── ProgressBar.tsx    # Survey step indicator
-│   │   ├── SurveyQuestion.tsx # Renders one question from the config
+│   │   ├── ProgressBar.tsx    # Per-section "Question x of N" indicator
+│   │   ├── SurveyHost.tsx     # Founder avatar + speech bubble (the "host")
+│   │   ├── SurveyQuestion.tsx # Renders one question from the config + reactions
+│   │   ├── Confetti.tsx       # Lightweight celebration on the thank-you screen
 │   │   └── WaitlistForm.tsx   # Reused on landing + survey exit/thank-you
 │   ├── pages/
 │   │   ├── Landing.tsx        # Route: /
@@ -149,19 +156,36 @@ Environment Variables** before deploying. See [`docs/DEPLOYMENT.md`](docs/DEPLOY
 
 ## The survey
 
-15 questions across 3 steps, defined declaratively in
+18 questions across 3 sections, defined declaratively in
 [`src/lib/survey.ts`](src/lib/survey.ts) so the questions, types, and database
-columns stay in one place. Key behaviours:
+columns stay in one place. It plays as a **conversation**, not a form:
 
-- **Multi-step** with a progress bar (Step _x_ of 3).
-- **Conditional exit:** selecting "Never — I do not use the shuttle" on Q2 ends
-  the survey early with a polite exit screen + inline waitlist form.
-- **Q13 max-3 validation:** extra checkboxes are disabled once three are chosen.
-- **Per-step required-field validation** before advancing.
-- **Thank-you screen** with a copy-the-link share button and a waitlist prompt.
+- **One question per frame** — questions advance one at a time with direction-aware
+  slide animations, a per-section **"Question _x_ of N"** progress bar, and
+  `Enter`-to-continue.
+- **A talking host** — a founder avatar + speech bubble (`SurveyHost`) narrates
+  each section, and the survey **whispers back** to telling answers inline (e.g.
+  *"Over 30 minutes?! That's a whole lecture intro lost."*).
+- **Three transport modes** — captures which modes the student uses (shuttle /
+  Keke / cab), their primary mode, and a compact **per-mode 1–5 rating grid**
+  (`ModeRatingGrid`) so the data is comparable across all three.
+- **Conditional exit** — selecting *"Never — I walk or use my own vehicle"* on the
+  gate question ends the survey early with a polite exit screen + waitlist form.
+- **Max-3 feature select** + **per-question required validation** before advancing.
+- **Contact step + waitlist opt-in** — an optional name/email step at the end with
+  a default-on waitlist opt-in. The survey row itself stays **anonymous**; the
+  email only ever feeds the `waitlist` table.
+- **Thank-you screen** with a confetti burst, a copy-the-link share button, and a
+  waitlist confirmation.
 
 All responses insert into the `survey_responses` table in a single call; export
 them as CSV from the Supabase Table Editor for your report.
+
+> **Heads-up:** the schema changed for the three-mode update — re-run
+> [`supabase/schema.sql`](supabase/schema.sql) in the Supabase SQL editor. It
+> renames `shuttle_frequency → transport_frequency` (guarded) and adds
+> `transport_modes`, `primary_mode`, and the `shuttle_rating` / `keke_rating` /
+> `cab_rating` columns. Existing rows are preserved.
 
 See [`docs/SUPABASE.md`](docs/SUPABASE.md) for the schema and how the data maps
 back into the report.
