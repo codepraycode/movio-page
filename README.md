@@ -1,4 +1,4 @@
-# Movio Survey
+# Movio Page
 
 The landing page + research survey for **Movio** — a smart campus transportation
 management system for the Federal University of Technology, Akure (FUTA) that
