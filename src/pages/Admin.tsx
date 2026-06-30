@@ -10,12 +10,15 @@ import {
     Gauge,
     UserMinus,
     AlertCircle,
+    DoorOpen,
+    DoorClosed,
 } from 'lucide-react'
 import { Logo } from '@/components/Logo'
 import { Button } from '@/components/ui/Button'
 import { Card, CardContent } from '@/components/ui/Card'
 import { useToast } from '@/components/ui/toast'
 import { supabase } from '@/lib/supabase'
+import { DEFAULT_SURVEY_OPEN, setSurveyOpen } from '@/lib/settings'
 import { surveySteps } from '@/lib/survey'
 import type { Question } from '@/lib/survey'
 import {
@@ -237,18 +240,22 @@ const Dashboard = ({ onLock }: { onLock: () => void }) => {
     const [waitlist, setWaitlist] = useState<WaitlistRow[]>([])
     const [loading, setLoading] = useState(true)
     const [loadError, setLoadError] = useState<string | null>(null)
+    // Survey open/closed flag (null until first load). Toggled below.
+    const [surveyOpen, setSurveyOpenState] = useState<boolean | null>(null)
+    const [savingStatus, setSavingStatus] = useState(false)
 
     // All setState happens after the first `await`, so this is safe to call
     // straight from the mount effect (no synchronous render cascade). The
     // spinner-on is handled by the refresh handler / initial `loading` state.
     const load = useCallback(async () => {
         try {
-            const [resResult, waitResult] = await Promise.all([
+            const [resResult, waitResult, settingsResult] = await Promise.all([
                 supabase
                     .from('survey_responses')
                     .select('*')
                     .order('created_at', { ascending: false }),
                 supabase.from('waitlist').select('*').order('created_at', { ascending: false }),
+                supabase.from('app_settings').select('survey_open').eq('id', 1).maybeSingle(),
             ])
 
             if (resResult.error) throw resResult.error
@@ -256,6 +263,8 @@ const Dashboard = ({ onLock }: { onLock: () => void }) => {
             // treat it as non-fatal so the dashboard still renders.
             setResponses((resResult.data ?? []) as SurveyResponseRow[])
             setWaitlist((waitResult.data ?? []) as WaitlistRow[])
+            // Settings read is non-fatal too — fall back to the default flag.
+            setSurveyOpenState(settingsResult.data?.survey_open ?? DEFAULT_SURVEY_OPEN)
             setLoadError(null)
         } catch (err) {
             const message =
@@ -311,6 +320,30 @@ const Dashboard = ({ onLock }: { onLock: () => void }) => {
     const handleLogout = () => {
         lock()
         onLock()
+    }
+
+    const handleToggleSurvey = async () => {
+        if (surveyOpen === null || savingStatus) return
+        const next = !surveyOpen
+        setSavingStatus(true)
+        const { error } = await setSurveyOpen(next)
+        setSavingStatus(false)
+        if (error) {
+            toast({
+                variant: 'error',
+                title: 'Couldn’t update survey status',
+                description: error,
+            })
+            return
+        }
+        setSurveyOpenState(next)
+        toast({
+            variant: 'success',
+            title: next ? 'Survey reopened' : 'Survey closed',
+            description: next
+                ? 'Students can now submit responses again.'
+                : 'The survey page now shows the “survey has ended” screen.',
+        })
     }
 
     const exportSurveyCsv = () => {
@@ -414,6 +447,61 @@ const Dashboard = ({ onLock }: { onLock: () => void }) => {
                         </Button>
                     </div>
                 </div>
+
+                {/* Survey open/closed switch */}
+                {surveyOpen !== null && (
+                    <Card
+                        className={
+                            surveyOpen
+                                ? 'border-brand-200 bg-brand-50/50'
+                                : 'border-amber-200 bg-amber-50/60'
+                        }
+                    >
+                        <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
+                            <div className="flex items-start gap-3">
+                                <span
+                                    className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${
+                                        surveyOpen
+                                            ? 'bg-brand-100 text-brand-700'
+                                            : 'bg-amber-100 text-amber-700'
+                                    }`}
+                                >
+                                    {surveyOpen ? (
+                                        <DoorOpen className="h-5 w-5" />
+                                    ) : (
+                                        <DoorClosed className="h-5 w-5" />
+                                    )}
+                                </span>
+                                <div>
+                                    <p className="font-semibold text-neutral-900">
+                                        Survey is {surveyOpen ? 'open' : 'closed'}
+                                    </p>
+                                    <p className="text-sm text-neutral-500">
+                                        {surveyOpen
+                                            ? 'Students can fill out and submit the survey.'
+                                            : 'The /survey page shows the “survey has ended” screen — no new responses.'}
+                                    </p>
+                                </div>
+                            </div>
+                            <Button
+                                variant={surveyOpen ? 'outline' : 'primary'}
+                                size="sm"
+                                loading={savingStatus}
+                                onClick={() => void handleToggleSurvey()}
+                            >
+                                {surveyOpen ? (
+                                    <>
+                                        <DoorClosed className="h-4 w-4" /> Close survey
+                                    </>
+                                ) : (
+                                    <>
+                                        <DoorOpen className="h-4 w-4" /> Reopen survey
+                                    </>
+                                )}
+                            </Button>
+                        </CardContent>
+                    </Card>
+                )}
 
                 {/* Top-line stats */}
                 <section className="grid grid-cols-2 gap-4 lg:grid-cols-4">

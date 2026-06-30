@@ -5,6 +5,8 @@ import {
     ArrowRight,
     CheckCircle2,
     CornerDownLeft,
+    Loader2,
+    Lock,
     PartyPopper,
     Send,
     ShieldCheck,
@@ -22,6 +24,7 @@ import { Input } from '@/components/ui/Input'
 import { Label } from '@/components/ui/Label'
 import { useToast } from '@/components/ui/toast'
 import { supabase, PG_UNIQUE_VIOLATION } from '@/lib/supabase'
+import { fetchSurveyOpen } from '@/lib/settings'
 import {
     surveySteps,
     initialAnswers,
@@ -41,6 +44,8 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 export function Survey() {
     const { toast } = useToast()
+    // null = still checking with Supabase whether the survey is open.
+    const [surveyOpen, setSurveyOpen] = useState<boolean | null>(null)
     const [view, setView] = useState<View>('form')
     // The flow advances one question at a time, framed inside its section.
     const [sectionIndex, setSectionIndex] = useState(0)
@@ -56,6 +61,17 @@ export function Survey() {
     const [contactEmail, setContactEmail] = useState('')
     const [joinWaitlist, setJoinWaitlist] = useState(true)
     const [joinedWaitlist, setJoinedWaitlist] = useState(false)
+
+    // Master switch: read once on mount so an ended survey stops taking responses.
+    useEffect(() => {
+        let active = true
+        fetchSurveyOpen().then((open) => {
+            if (active) setSurveyOpen(open)
+        })
+        return () => {
+            active = false
+        }
+    }, [])
 
     const section = surveySteps[sectionIndex]
     const question = section.questions[questionIndex]
@@ -191,6 +207,24 @@ export function Survey() {
         setSubmitting(false)
         setView('done')
         window.scrollTo({ top: 0, behavior: 'smooth' })
+    }
+
+    // Still checking the flag — keep it quiet so a brief check doesn't flash the form.
+    if (surveyOpen === null) {
+        return (
+            <div className="flex min-h-screen flex-col bg-neutral-50">
+                <Navbar />
+                <div className="flex flex-1 items-center justify-center">
+                    <Loader2 className="text-brand-500 h-6 w-6 animate-spin" aria-label="Loading" />
+                </div>
+                <Footer />
+            </div>
+        )
+    }
+
+    // Survey has ended — no form, no submissions.
+    if (!surveyOpen) {
+        return <SurveyClosedScreen />
     }
 
     return (
@@ -446,6 +480,74 @@ function ContactStep({
                     </div>
                 </form>
             </div>
+        </div>
+    )
+}
+
+/**
+ * Shown on /survey once the survey has been closed (app_settings.survey_open =
+ * false). No form is rendered, so no further responses can be submitted — but
+ * visitors can still join the waitlist and head back home.
+ */
+function SurveyClosedScreen() {
+    const shareUrl = typeof window !== 'undefined' ? window.location.origin : ''
+
+    return (
+        <div className="flex min-h-screen flex-col bg-neutral-50">
+            <Navbar />
+            <div className="bg-grid relative flex-1">
+                <div
+                    className="bg-aurora pointer-events-none absolute inset-x-0 top-0 h-64"
+                    aria-hidden
+                />
+                <main className="relative mx-auto max-w-2xl px-4 py-10">
+                    <div className="animate-fade-up space-y-6">
+                        <div className="border-brand-100 from-brand-50 relative overflow-hidden rounded-2xl border bg-gradient-to-br to-white p-8 text-center shadow-sm">
+                            <span className="bg-brand-50 text-brand-600 mx-auto flex h-14 w-14 items-center justify-center rounded-2xl">
+                                <Lock className="h-7 w-7" />
+                            </span>
+                            <h1 className="mt-4 text-2xl font-bold text-neutral-900">
+                                The survey has closed 🙏🏽
+                            </h1>
+                            <p className="mx-auto mt-3 max-w-md text-neutral-600">
+                                Thank you to every FUTA student who took part — responses are no
+                                longer being collected. Your input is now shaping Movio as a final
+                                year project at the School of Computing, FUTA.
+                            </p>
+                        </div>
+
+                        <div className="rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm">
+                            <h2 className="mb-1 text-center text-lg font-semibold text-neutral-900">
+                                Still want Movio on your phone?
+                            </h2>
+                            <p className="mb-4 text-center text-sm text-neutral-600">
+                                The survey is done, but you can still join the waitlist and be the
+                                first to know when Movio launches.
+                            </p>
+                            <WaitlistForm />
+                        </div>
+
+                        <div className="rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm">
+                            <h2 className="text-center text-sm font-semibold text-neutral-900">
+                                Know someone who’d want Movio at FUTA? Share it.
+                            </h2>
+                            <div className="mt-4">
+                                <ShareButtons url={shareUrl} />
+                            </div>
+                        </div>
+
+                        <p className="text-center">
+                            <Link
+                                to="/"
+                                className="text-brand-700 hover:text-brand-800 text-sm font-medium"
+                            >
+                                ← Back to home
+                            </Link>
+                        </p>
+                    </div>
+                </main>
+            </div>
+            <Footer />
         </div>
     )
 }

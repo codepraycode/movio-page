@@ -106,3 +106,41 @@ create policy "Allow anonymous reads" on survey_responses
 drop policy if exists "Allow anonymous reads" on waitlist;
 create policy "Allow anonymous reads" on waitlist
     for select using (true);
+
+-- ---------------------------------------------------------------------------
+-- App settings — runtime switches read by the app on load.
+--
+-- A single-row table (id is always 1). `survey_open` is the master switch:
+--   false → the /survey page shows a "survey has ended" screen and accepts no
+--            new responses; true → the survey runs normally.
+--
+-- Flip it WITHOUT redeploying, either from the /admin page (Survey status card)
+-- or right here in Supabase (Table Editor → app_settings → toggle survey_open).
+-- It takes effect the next time someone loads the page.
+-- ---------------------------------------------------------------------------
+
+create table if not exists app_settings (
+    id integer primary key default 1,
+    survey_open boolean not null default true,
+    constraint app_settings_singleton check (id = 1)
+);
+
+-- Seed the single row. Seeded CLOSED to match the current "survey has ended"
+-- state; set survey_open = true (or use the /admin toggle) to reopen it.
+insert into app_settings (id, survey_open) values (1, false)
+    on conflict (id) do nothing;
+
+alter table app_settings enable row level security;
+
+-- Everyone can read the flag (the app needs it on every page load)...
+drop policy if exists "Allow anonymous reads" on app_settings;
+create policy "Allow anonymous reads" on app_settings
+    for select using (true);
+
+-- ...and update it. Like the /admin reads, this is a convenience lock guarded
+-- by the access code in the UI, NOT real security — the publishable key ships
+-- to the browser, so anyone with it could flip this flag. Acceptable for a
+-- campus survey. To lock it down, DROP this policy and toggle from Supabase only.
+drop policy if exists "Allow anonymous updates" on app_settings;
+create policy "Allow anonymous updates" on app_settings
+    for update using (true) with check (true);
